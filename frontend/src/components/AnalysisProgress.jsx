@@ -1,0 +1,3 @@
+import { analysisStages } from '../data/analysisData'
+export default function AnalysisProgress({ stage }) { return <section className="progress-screen" aria-live="polite"><div className="progress-card"><p className="eyebrow">GLANCE FORENSIC ENGINE</p><h2>Examining identity signals</h2><p className="progress-intro">We’re building a transparent assessment from the image’s visual evidence.</p><div className="stages">{analysisStages.map((item, i) => <div className={`stage ${i < stage ? 'done' : i === stage ? 'current' : ''}`} key={item}><span>{i < stage ? '✓' : i === stage ? '◉' : '○'}</span>{item}</div>)}</div><p className="demo-note">Demo analysis — not a production verification decision.</p></div></section> }
+
