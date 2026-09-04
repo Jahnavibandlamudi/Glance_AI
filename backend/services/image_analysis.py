@@ -223,6 +223,29 @@ def _filename_prompt_score(filename: str | None) -> float:
     return 1.0 if any(term in lowered for term in prompt_terms) else 0.0
 
 
+def _embedded_generator_score(image_bytes: bytes) -> float:
+    sample = image_bytes[: min(len(image_bytes), 524288)].lower()
+    generator_terms = (
+        b"prompt",
+        b"negative prompt",
+        b"seed",
+        b"sampler",
+        b"cfg scale",
+        b"steps",
+        b"stable diffusion",
+        b"stablediffusion",
+        b"midjourney",
+        b"comfyui",
+        b"automatic1111",
+        b"novelai",
+        b"dall-e",
+        b"dalle",
+        b"adobe firefly",
+    )
+    matches = sum(1 for term in generator_terms if term in sample)
+    return min(matches / 3, 1.0)
+
+
 def _megapixels(metadata: ImageMetadata) -> float | None:
     if metadata.width is None or metadata.height is None:
         return None
@@ -241,6 +264,7 @@ def _analyze_ai_generation(metadata: ImageMetadata, image_bytes: bytes) -> dict:
     smoothness = _byte_smoothness_score(image_bytes)
     bytes_per_pixel = _bytes_per_pixel(metadata)
     filename_prompt = _filename_prompt_score(metadata.filename)
+    embedded_generator = _embedded_generator_score(image_bytes)
 
     warnings = []
     normal_signals = []
@@ -274,10 +298,13 @@ def _analyze_ai_generation(metadata: ImageMetadata, image_bytes: bytes) -> dict:
         score -= 14
     elif metadata.format == "JPEG":
         warnings.append("JPEG has no EXIF metadata")
-        score += 8
+        score += 18
 
     if metadata.has_png_text:
         normal_signals.append("PNG metadata text chunk is present")
+    elif metadata.format in {"PNG", "WEBP"}:
+        warnings.append("Image has limited embedded provenance metadata")
+        score += 16
 
     if entropy < 4.5:
         warnings.append("Very low byte entropy")
@@ -312,6 +339,10 @@ def _analyze_ai_generation(metadata: ImageMetadata, image_bytes: bytes) -> dict:
         warnings.append("Filename contains common generated-image terms")
         score += 34
 
+    if embedded_generator:
+        warnings.append("Embedded metadata contains generator-style terms")
+        score += 38 * embedded_generator
+
     score = _clamp(score)
 
     return {
@@ -326,6 +357,7 @@ def _analyze_ai_generation(metadata: ImageMetadata, image_bytes: bytes) -> dict:
             "repeated_chunk_ratio": round(repeated_chunks, 4),
             "smoothness_score": round(smoothness, 3),
             "bytes_per_pixel": round(bytes_per_pixel, 4) if bytes_per_pixel is not None else None,
+            "embedded_generator_score": round(embedded_generator, 3),
             "megapixels": round(_megapixels(metadata), 3) if _megapixels(metadata) is not None else None,
         },
     }
@@ -399,7 +431,7 @@ def fuse_evidence(ai_detection: dict, biometric: dict, forensic: dict) -> dict:
         verdict = "LIKELY_AI_GENERATED"
         risk_level = "HIGH"
         confidence = _clamp(score)
-    elif score >= 45 and warning_count >= 2:
+    elif score >= 30 and warning_count >= 2:
         verdict = "UNCERTAIN"
         risk_level = "MEDIUM"
         confidence = _clamp(score)
