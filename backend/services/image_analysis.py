@@ -4,6 +4,10 @@ import statistics
 import struct
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
+from io import BytesIO
+from pathlib import Path
+import re
 
 
 SUPPORTED_FORMATS = {
@@ -12,6 +16,10 @@ SUPPORTED_FORMATS = {
     "png": "PNG",
     "webp": "WEBP",
 }
+
+VISUAL_DETECTOR_PATH = (
+    Path(__file__).resolve().parents[1] / "models" / "visual_ai_detector.joblib"
+)
 
 
 @dataclass(frozen=True)
@@ -219,8 +227,15 @@ def _filename_prompt_score(filename: str | None) -> float:
         "synthetic",
         "text2img",
         "txt2img",
+        "deepfake",
+        "face-swap",
+        "faceswap",
     )
-    return 1.0 if any(term in lowered for term in prompt_terms) else 0.0
+    if any(term in lowered for term in prompt_terms):
+        return 1.0
+
+    tokens = set(re.findall(r"[a-z0-9]+", lowered))
+    return 1.0 if tokens.intersection({"ai", "fake", "synthetic"}) else 0.0
 
 
 def _embedded_generator_score(image_bytes: bytes) -> float:
@@ -258,13 +273,123 @@ def _bytes_per_pixel(metadata: ImageMetadata) -> float | None:
     return metadata.size_bytes / (metadata.width * metadata.height)
 
 
+def _has_embedded_provenance(metadata: ImageMetadata) -> bool:
+    return metadata.has_exif or metadata.has_png_text
+
+
+def _identity_photo_filename_score(filename: str | None) -> float:
+    if not filename:
+        return 0.0
+
+    tokens = set(re.findall(r"[a-z0-9]+", filename.lower()))
+    identity_terms = {
+        "passport",
+        "id",
+        "kyc",
+        "visa",
+        "headshot",
+        "portrait",
+        "profile",
+        "photo",
+        "pic",
+    }
+    return 1.0 if tokens.intersection(identity_terms) else 0.0
+
+
+def _passport_style_score(metadata: ImageMetadata, image_bytes: bytes) -> float:
+    if not metadata.width or not metadata.height:
+        return 0.0
+
+    aspect_ratio = metadata.width / metadata.height
+    passport_aspect = 0.58 <= aspect_ratio <= 0.92
+    if not passport_aspect:
+        return 0.0
+
+    try:
+        import numpy as np
+        from PIL import Image
+
+        image = Image.open(BytesIO(image_bytes)).convert("RGB").resize((96, 128))
+        pixels = np.asarray(image, dtype=np.float32) / 255.0
+    except Exception:
+        return 0.0
+
+    border = np.concatenate(
+        [
+            pixels[:12, :, :].reshape(-1, 3),
+            pixels[-12:, :, :].reshape(-1, 3),
+            pixels[:, :12, :].reshape(-1, 3),
+            pixels[:, -12:, :].reshape(-1, 3),
+        ],
+        axis=0,
+    )
+    center = pixels[32:96, 24:72, :].reshape(-1, 3)
+    border_uniformity = 1.0 - min(float(border.std()) / 0.28, 1.0)
+    center_contrast = min(float(abs(center.mean() - border.mean())) / 0.28, 1.0)
+    size_score = 1.0 if min(metadata.width, metadata.height) >= 180 else 0.5
+    return round((border_uniformity * 0.55) + (center_contrast * 0.25) + (size_score * 0.2), 3)
+
+
+@lru_cache(maxsize=1)
+def _load_visual_detector():
+    if not VISUAL_DETECTOR_PATH.exists():
+        return None, "No trained visual detector artifact found."
+
+    try:
+        import joblib
+        import torch
+        from PIL import Image
+        from torchvision import models
+    except Exception as exc:
+        return None, f"Visual detector dependencies are unavailable: {exc}"
+
+    try:
+        artifact = joblib.load(VISUAL_DETECTOR_PATH)
+        weights = models.MobileNet_V3_Small_Weights.DEFAULT
+        model = models.mobilenet_v3_small(weights=weights)
+        model.classifier = torch.nn.Identity()
+        model.eval()
+        return (artifact, torch, Image, model, weights.transforms()), None
+    except Exception as exc:
+        return None, f"Visual detector could not be loaded: {exc}"
+
+
+def _predict_visual_ai_probability(image_bytes: bytes) -> dict:
+    runtime, error = _load_visual_detector()
+    if error:
+        return {"status": "unavailable", "error": error}
+
+    artifact, torch, Image, model, transform = runtime
+    try:
+        image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    except Exception as exc:
+        return {"status": "unavailable", "error": f"Image could not be decoded: {exc}"}
+
+    with torch.no_grad():
+        tensor = transform(image).unsqueeze(0)
+        features = model(tensor).detach().cpu().numpy()
+
+    classifier = artifact["classifier"]
+    ai_probability = float(classifier.predict_proba(features)[0][1])
+    return {
+        "status": "implemented",
+        "ai_probability": ai_probability,
+        "real_probability": 1.0 - ai_probability,
+        "artifact": str(VISUAL_DETECTOR_PATH),
+        "training_summary": artifact.get("training_summary", {}),
+    }
+
+
 def _analyze_ai_generation(metadata: ImageMetadata, image_bytes: bytes) -> dict:
     entropy = _entropy(image_bytes)
     repeated_chunks = _repetition_score(image_bytes)
     smoothness = _byte_smoothness_score(image_bytes)
     bytes_per_pixel = _bytes_per_pixel(metadata)
     filename_prompt = _filename_prompt_score(metadata.filename)
+    identity_filename = _identity_photo_filename_score(metadata.filename)
     embedded_generator = _embedded_generator_score(image_bytes)
+    passport_style = _passport_style_score(metadata, image_bytes)
+    visual_prediction = _predict_visual_ai_probability(image_bytes)
 
     warnings = []
     normal_signals = []
@@ -343,6 +468,39 @@ def _analyze_ai_generation(metadata: ImageMetadata, image_bytes: bytes) -> dict:
         warnings.append("Embedded metadata contains generator-style terms")
         score += 38 * embedded_generator
 
+    heuristic_score = _clamp(score)
+    if visual_prediction["status"] == "implemented":
+        visual_score = _clamp(visual_prediction["ai_probability"] * 100)
+        has_generator_evidence = bool(filename_prompt or embedded_generator)
+        has_identity_photo_safeguard = (
+            (passport_style >= 0.7 or identity_filename)
+            and not has_generator_evidence
+        )
+        if visual_score >= 90 and has_identity_photo_safeguard:
+            score = 74
+            warnings.append(
+                "Formal identity photo can resemble generated imagery; manual review is required"
+            )
+        elif visual_score >= 99:
+            score = max(visual_score, heuristic_score)
+            warnings.append("Visual detector found very strong AI-generation patterns")
+        elif visual_score >= 65:
+            score = max(visual_score, heuristic_score)
+            warnings.append("Visual detector found AI-generation patterns")
+        elif visual_score <= 35:
+            if has_generator_evidence:
+                score = max(visual_score, 72)
+                warnings.append("Visual detector disagrees with explicit generator indicators")
+            else:
+                score = visual_score
+                normal_signals.append("Visual detector found genuine-image patterns")
+        else:
+            score = visual_score
+            warnings.append("Visual detector result is borderline")
+    else:
+        score = heuristic_score
+        normal_signals.append(visual_prediction["error"])
+
     score = _clamp(score)
 
     return {
@@ -358,6 +516,26 @@ def _analyze_ai_generation(metadata: ImageMetadata, image_bytes: bytes) -> dict:
             "smoothness_score": round(smoothness, 3),
             "bytes_per_pixel": round(bytes_per_pixel, 4) if bytes_per_pixel is not None else None,
             "embedded_generator_score": round(embedded_generator, 3),
+            "identity_photo_filename_score": identity_filename,
+            "passport_style_score": passport_style,
+            "identity_photo_safeguard": (
+                bool((passport_style >= 0.7 or identity_filename) and not (filename_prompt or embedded_generator))
+                if visual_prediction["status"] == "implemented"
+                else False
+            ),
+            "heuristic_score": heuristic_score,
+            "visual_ai_probability": (
+                round(visual_prediction["ai_probability"], 4)
+                if visual_prediction["status"] == "implemented"
+                else None
+            ),
+            "visual_real_probability": (
+                round(visual_prediction["real_probability"], 4)
+                if visual_prediction["status"] == "implemented"
+                else None
+            ),
+            "visual_detector_status": visual_prediction["status"],
+            "embedded_provenance_present": _has_embedded_provenance(metadata),
             "megapixels": round(_megapixels(metadata), 3) if _megapixels(metadata) is not None else None,
         },
     }
@@ -427,18 +605,57 @@ def fuse_evidence(ai_detection: dict, biometric: dict, forensic: dict) -> dict:
         + len(forensic.get("warnings", []))
     )
 
-    if score >= 70 and warning_count >= 3:
+    visual_status = ai_detection.get("metrics", {}).get("visual_detector_status")
+    provenance_present = ai_detection.get("metrics", {}).get("embedded_provenance_present")
+    identity_photo_safeguard = ai_detection.get("metrics", {}).get("identity_photo_safeguard")
+
+    if visual_status == "implemented" and score >= 99 and not identity_photo_safeguard:
+        verdict = "LIKELY_AI_GENERATED"
+        risk_level = "HIGH"
+        confidence = 92
+        explanation = "Visual detector found very strong AI-generation patterns."
+    elif visual_status == "implemented" and score >= 65 and not identity_photo_safeguard:
+        verdict = "LIKELY_AI_GENERATED"
+        risk_level = "HIGH"
+        confidence = _clamp(min(92, score))
+        explanation = "Visual detector found AI-generation patterns; metadata and forensic signals are supporting evidence."
+    elif visual_status == "implemented" and score <= 40:
+        verdict = "LIKELY_GENUINE"
+        risk_level = "LOW"
+        confidence = _clamp(min(88, 100 - score))
+        if provenance_present:
+            explanation = "Visual detector found genuine-image patterns and embedded provenance is present."
+        else:
+            explanation = "Visual detector found genuine-image patterns, but confidence is capped because embedded provenance is missing."
+    elif visual_status == "implemented":
+        verdict = "UNCERTAIN"
+        risk_level = "MEDIUM"
+        confidence = _clamp(max(score, 100 - score))
+        explanation = "Visual detector result is borderline, so this image should be manually reviewed."
+    elif score >= 70 and warning_count >= 3:
         verdict = "LIKELY_AI_GENERATED"
         risk_level = "HIGH"
         confidence = _clamp(score)
+        explanation = (
+            "Conservative fusion only flags AI-generated when multiple independent "
+            "signals are suspicious."
+        )
     elif score >= 30 and warning_count >= 2:
         verdict = "UNCERTAIN"
         risk_level = "MEDIUM"
         confidence = _clamp(score)
+        explanation = (
+            "Conservative fusion only flags AI-generated when multiple independent "
+            "signals are suspicious."
+        )
     else:
         verdict = "LIKELY_GENUINE"
         risk_level = "LOW"
         confidence = _clamp(100 - min(score, 55))
+        explanation = (
+            "Conservative fusion only flags AI-generated when multiple independent "
+            "signals are suspicious."
+        )
 
     return {
         "module": "services.image_analysis.fuse_evidence",
@@ -448,10 +665,7 @@ def fuse_evidence(ai_detection: dict, biometric: dict, forensic: dict) -> dict:
         "risk_level": risk_level,
         "score": score,
         "warning_count": warning_count,
-        "explanation": (
-            "Conservative fusion only flags AI-generated when multiple independent "
-            "signals are suspicious."
-        ),
+        "explanation": explanation,
     }
 
 

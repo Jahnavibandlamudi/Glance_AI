@@ -1,3 +1,7 @@
-backend\venv\
-__pycache__\
+backend/venv/
+backend/data/
+backend/models/*.joblib
+!backend/models/visual_ai_detector.joblib
+backend/models/*.pth
+__pycache__/
 *.pyc

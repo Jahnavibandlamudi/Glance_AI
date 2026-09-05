@@ -6,6 +6,8 @@ import ResultDashboard from './components/ResultDashboard'
 import { analysisStages } from './data/analysisData'
 import './App.css'
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8010'
+
 function App() {
   const [file, setFile] = useState(null); const [view, setView] = useState('landing'); const [stage, setStage] = useState(0); const [result, setResult] = useState(null)
   useEffect(() => { if (view !== 'progress') return; const timer = setTimeout(() => setStage(s => Math.min(s + 1, analysisStages.length - 1)), 480); return () => clearTimeout(timer) }, [view, stage])
@@ -15,7 +17,7 @@ function App() {
     const body = new FormData()
     body.append('file', file.raw)
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/analyze/image', { method: 'POST', body })
+      const response = await fetch(`${API_BASE_URL}/api/analyze/image`, { method: 'POST', body })
       const data = await response.json()
       if (!response.ok) throw new Error(data?.detail || 'Image analysis failed.')
       setResult(formatBackendResult(data))
@@ -86,7 +88,7 @@ const formatErrorResult = (error) => ({
   tone: 'danger',
   isDemo: false,
   message: error.message || 'The backend could not analyze this image.',
-  signals: [['Backend connection', 0, 'Check that FastAPI is running on http://127.0.0.1:8000.']],
+  signals: [['Backend connection', 0, `Check that FastAPI is running on ${API_BASE_URL}.`]],
   biometrics: [['Request completed', 'FLAGGED']],
   reasons: [['Unable to complete analysis', 'The UI could not get a valid response from the backend.']],
 })
