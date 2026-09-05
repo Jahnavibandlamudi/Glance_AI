@@ -1,4 +1,30 @@
-const statusClass = (s) => s.toLowerCase()
-export default function ResultDashboard({ result, file, onReset }) { return <main className="dashboard"><header className="dashboard-header"><button className="brand-button" onClick={onReset}>GLANCE</button><span>Forensic assessment <b>{result.isDemo ? 'DEMO' : 'LIVE'}</b></span><button className="new-check" onClick={onReset}>New check</button></header><div className="dashboard-content"><section className={`result-summary ${result.tone}`}><div><p className="eyebrow">ASSESSMENT VERDICT</p><h1>{result.verdict}</h1><p>{result.message}</p></div><div className="result-stats"><div><strong>{result.confidence}%</strong><span>confidence</span></div><div><strong>{result.riskLevel}</strong><span>risk level</span></div></div></section><section className="grid two"><Panel title="Analysis Signals"><div className="signal-list">{result.signals.map(([name, score, note]) => <div className="signal" key={name}><div><strong>{name}</strong><b>{score}<small>/100</small></b></div><div className="meter"><i style={{ width: `${score}%` }} /></div><p>{note}</p></div>)}</div></Panel><Panel title="Biometric Analysis"><div className="bio-list">{result.biometrics.map(([label, status]) => <div key={label}><span>{label}</span><b className={statusClass(status)}>{status}</b></div>)}</div></Panel></section><section className="grid two lower"><Panel title={result.riskLevel === 'LOW' ? 'Why was this image cleared?' : 'Why was this image flagged?'}>{result.reasons.map(([heading, copy]) => <article className="reason" key={heading}><span>⌁</span><div><strong>{heading}</strong><p>{copy}</p></div></article>)}</Panel><Panel title="Forensic Review"><div className="anomaly-map">{file?.url && <img src={file.url} alt="Forensic view of the submitted image" />}<i className="hotspot eye">Signal A</i><i className="hotspot edge">Signal B</i><i className="hotspot texture">Signal C</i><div className="map-wash" /></div><p className="map-caption">Visual context for the submitted image and backend assessment.</p></Panel></section><section className="video-next"><div><span>COMING NEXT</span><h2>Video Deepfake Analysis</h2><p>Bring temporal signals into the same explainable security workflow.</p></div><div className="video-flow">{['Video upload', 'Frame extraction', 'Face analysis', 'Temporal analysis', 'Risk score'].map((step, i) => <><b key={step}>{step}</b>{i < 4 && <i key={`${step}-arrow`}>→</i>}</>)}</div></section></div></main> }
-function Panel({ title, children }) { return <section className="panel"><h2>{title}</h2>{children}</section> }
+import { useState } from 'react'
 
+export default function ResultDashboard({ result, file, onReset, onFeedback }) {
+  const [feedback, setFeedback] = useState('')
+  const correct = async (label) => {
+    setFeedback('Saving correction...')
+    try { await onFeedback(label); setFeedback('Saved for future training. Current prediction is unchanged.') }
+    catch { setFeedback('Could not save correction.') }
+  }
+  return <main className="dashboard">
+    <header className="dashboard-header"><button className="brand-button" onClick={onReset}>GLANCE</button><span>Image assessment</span><button className="new-check" onClick={onReset}>New check</button></header>
+    <div className="dashboard-content">
+      <section className={`result-summary ${result.tone}`}>
+        <div><p className="eyebrow">AI IMAGE ASSESSMENT</p><h1>{result.verdict}</h1><p>{result.message}</p>{result.cameraAssessment && <p><strong>{result.cameraAssessment}</strong></p>}</div>
+        <div className="result-stats"><div><strong>{result.confidence == null ? 'N/A' : `${result.confidence}%`}</strong><span>model score</span></div><div><strong>{result.riskLevel}</strong><span>review priority</span></div></div>
+      </section>
+      <section className="correction-panel"><span>Correction feedback</span><div><button type="button" onClick={() => correct('real')}>Actually real</button><button type="button" onClick={() => correct('ai')}>Actually AI</button></div>{feedback && <p>{feedback}</p>}</section>
+      <section className="grid two">
+        <Panel title="Model Estimates"><div className="signal-list">{result.signals.map(([name, score, note]) => <div className="signal" key={name}><div><strong>{name}</strong><b>{score == null ? 'N/A' : `${score}%`}</b></div>{score != null && <div className="meter"><i style={{ width: `${score}%` }} /></div>}<p>{note}</p></div>)}</div></Panel>
+        <Panel title="Verification Coverage"><div className="bio-list">{result.biometrics.map(([label, status]) => <div key={label}><span>{label}</span><b className={status === 'PASS' ? 'pass' : 'warn'}>{status}</b></div>)}</div></Panel>
+      </section>
+      <section className="grid two lower">
+        <Panel title="Assessment Details">{result.reasons.map(([heading, copy]) => <article className="reason" key={heading}><div><strong>{heading}</strong>{copy && <p>{copy}</p>}</div></article>)}</Panel>
+        <Panel title="Forensic Review"><div className="anomaly-map">{file?.url && <img src={file.url} alt="Submitted image without anomaly markers" />}</div><div className="forensic-facts">{result.forensicReview.map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div></Panel>
+      </section>
+    </div>
+  </main>
+}
+
+function Panel({ title, children }) { return <section className="panel"><h2>{title}</h2>{children}</section> }

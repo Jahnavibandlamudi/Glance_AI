@@ -12,7 +12,6 @@ for _path in (_PROJECT_ROOT, _BACKEND_DIR):
         sys.path.insert(0, _path_str)
 
 from routes.image import router as image_router
-from routes.video import router as video_router
 
 app = FastAPI(title="Glance_AI")
 
@@ -32,7 +31,6 @@ app.add_middleware(
 )
 
 app.include_router(image_router)
-app.include_router(video_router)
 
 
 @app.get("/")

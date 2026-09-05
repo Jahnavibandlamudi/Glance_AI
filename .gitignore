@@ -3,5 +3,10 @@ backend/data/
 backend/models/*.joblib
 !backend/models/visual_ai_detector.joblib
 backend/models/*.pth
+backend/models/antispoof/
+backend/models/siglip_general/
+backend/models/general_benchmark.json
+backend/models/*candidate.json
+backend/server.*.log
 __pycache__/
 *.pyc

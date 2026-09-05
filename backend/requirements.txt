@@ -3,7 +3,11 @@ uvicorn
 python-multipart
 pillow
 numpy
-scikit-learn
+scikit-learn>=1.6
 joblib
 torch
 torchvision
+transformers
+safetensors
+hf_xet
+opencv-python-headless>=4.10,<5
