@@ -140,6 +140,25 @@ def batched_features(rows, model, transform, device):
     return np.concatenate(features), np.asarray([row[1] for row in rows])
 
 
+def training_features(rows, model, transform, device):
+    standard_rows = [(path, label) for path, label, is_feedback in rows if not is_feedback]
+    feedback_rows = [(path, label, is_feedback) for path, label, is_feedback in rows if is_feedback]
+    features, labels = batched_features(standard_rows, model, transform, device)
+    if not feedback_rows:
+        return features, labels
+    feedback_features, feedback_labels = extract_features(
+        feedback_rows,
+        model,
+        transform,
+        device,
+        augment_feedback=True,
+    )
+    return (
+        np.concatenate([features, feedback_features]),
+        np.concatenate([labels, feedback_labels]),
+    )
+
+
 def evaluate(classifier, features, labels):
     probabilities = classifier.predict_proba(features)[:, 1]
     predictions = (probabilities >= 0.5).astype(np.int64)
@@ -204,7 +223,7 @@ def main():
                     for rows in (train_rows, valid_rows, test_rows)]
     if any(split_hashes[a] & split_hashes[b] for a, b in ((0, 1), (0, 2), (1, 2))):
         raise ValueError("Duplicate images cross training/calibration/test boundaries.")
-    train_features, train_labels = batched_features(
+    train_features, train_labels = training_features(
         train_rows,
         feature_model,
         weights.transforms(),

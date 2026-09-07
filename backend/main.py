@@ -1,4 +1,5 @@
 import sys
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -12,6 +13,7 @@ for _path in (_PROJECT_ROOT, _BACKEND_DIR):
         sys.path.insert(0, _path_str)
 
 from routes.image import router as image_router
+from routes.verify import router as verify_router
 
 app = FastAPI(title="Glance_AI")
 
@@ -31,6 +33,29 @@ app.add_middleware(
 )
 
 app.include_router(image_router)
+app.include_router(verify_router)
+
+
+@app.on_event("startup")
+def warm_local_models():
+    """Load local ML models before the first user request hits a timeout."""
+    try:
+        from PIL import Image
+        from services.image_analysis import predict, predict_synthetic_domain
+
+        warmup_image = Image.new("RGB", (256, 256), "white")
+        predict(warmup_image)
+        predict_synthetic_domain(warmup_image)
+    except Exception:
+        logging.getLogger(__name__).exception("Image model warmup failed")
+    try:
+        from services.face_match import load_face_models
+        from services.liveness import load_models
+
+        load_face_models()
+        load_models()
+    except Exception:
+        logging.getLogger(__name__).exception("Identity model warmup failed")
 
 
 @app.get("/")

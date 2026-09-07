@@ -10,4 +10,6 @@ torchvision
 transformers
 safetensors
 hf_xet
+sentencepiece
 opencv-python-headless>=4.10,<5
+facenet-pytorch>=2.6,<3

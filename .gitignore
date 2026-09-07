@@ -5,7 +5,14 @@ backend/models/*.joblib
 backend/models/*.pth
 backend/models/antispoof/
 backend/models/siglip_general/
+backend/models/siglip_domain/
 backend/models/general_benchmark.json
+backend/models/domain_benchmark.json
+backend/models/sdxl_swin_detector/
+backend/models/sdxl_swin_benchmark.json
+backend/models/deepfake_vit/
+backend/models/deepfake_vit_probe/
+backend/models/deepfake_vit_benchmark.json
 backend/models/*candidate.json
 backend/server.*.log
 __pycache__/

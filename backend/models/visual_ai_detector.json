@@ -1,0 +1,60 @@
+{
+  "dataset": "backend\\data\\raw\\140k\\real_vs_fake\\real-vs-fake",
+  "feedback": "backend\\data\\feedback",
+  "train_rows": 10016,
+  "test_rows": 2000,
+  "feedback_rows": 16,
+  "per_class": 5000,
+  "feedback_repeat": 1,
+  "feature_model_key": "efficientnet_b0",
+  "test": {
+    "brier_score": 0.1100428389615775,
+    "log_loss": 0.3536592875653878,
+    "accuracy": 0.852,
+    "confusion_matrix": [
+      [
+        840,
+        160
+      ],
+      [
+        136,
+        864
+      ]
+    ],
+    "real_precision": 0.860655737704918,
+    "real_recall": 0.84,
+    "real_f1": 0.8502024291497976,
+    "fake_precision": 0.84375,
+    "fake_recall": 0.864,
+    "fake_f1": 0.8537549407114624
+  },
+  "feedback_training_check_only": {
+    "brier_score": 0.01463479336594959,
+    "log_loss": 0.0873170176780441,
+    "accuracy": 1.0,
+    "confusion_matrix": [
+      [
+        11,
+        0
+      ],
+      [
+        0,
+        5
+      ]
+    ],
+    "real_precision": 1.0,
+    "real_recall": 1.0,
+    "real_f1": 1.0,
+    "fake_precision": 1.0,
+    "fake_recall": 1.0,
+    "fake_f1": 1.0
+  },
+  "calibration_rows": 2000,
+  "scope": "Real-vs-fake face dataset; modern generators and camera replay are not validated.",
+  "thresholds": {
+    "likely_genuine_max_ai_probability": 0.35,
+    "likely_ai_min_ai_probability": 0.65
+  },
+  "feature_model": "torchvision efficientnet_b0 frozen ImageNet embeddings + calibrated logistic classifier",
+  "created_at": "2026-09-05 21:59:10"
+}

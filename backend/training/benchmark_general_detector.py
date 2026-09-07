@@ -20,10 +20,17 @@ MODELS = {
     },
     "sdxl_swin": {
         "model_id": "Organika/sdxl-detector",
-        "revision": "ad18a48c10c4f5bc8a98ed42a68d875d6df786a6",
+        "revision": "b37fede8562cb72b89ec201c0987f96ba21b518a",
         "destination": Path("backend/models/sdxl_swin_detector"),
         "ai_label": "artificial",
         "report": Path("backend/models/sdxl_swin_benchmark.json"),
+    },
+    "deepfake_vit": {
+        "model_id": "dima806/deepfake_vs_real_image_detection",
+        "revision": "29e4cf9efc543845610045f6ba7e88e5cf9d9301",
+        "destination": Path("backend/models/deepfake_vit"),
+        "ai_label": "fake",
+        "report": Path("backend/models/deepfake_vit_benchmark.json"),
     },
 }
 
